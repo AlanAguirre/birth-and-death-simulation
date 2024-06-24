@@ -17,17 +17,19 @@ Scenario:
 
 from __future__ import annotations
 
+import matplotlib.pyplot as plt
 import random
-from typing import Dict, List, NamedTuple, Optional, Tuple
-
 import simpy
 
 from simpy import Environment
+from typing import Dict, List, NamedTuple, Optional, Tuple
+
 
 RANDOM_SEED = 2024
 TPM = 240  # Tokens Per Minute divided by 1000.
 MESSAGE_TOKENS = 7 # Average tokens per message divided by 1000.
-ENDPOINT_SLOT = 40 # Tokens per slot, ((240k / 1k) / 6) tokens.
+NUMBER_OF_SLOTS = 6 # Number of states to be used in the simulation
+ENDPOINT_SLOT = TPM / NUMBER_OF_SLOTS # Tokens per slot. E.g.: (240 / 6) = 40 tokens.
 SIM_TIME = 60*(60*2)  # Simulate until.
 MESSAGES_ANSWERED = 10 # Average message response time.
 
@@ -99,13 +101,17 @@ def _answer_messages(env: Environment, endpoint: Endpoint, num_messages: int):
        by the endpoint.
        
     """
-    t = random.expovariate(1.0 / random.randint(6, 30))
+    t = 0
+    if num_messages > 0:
+        u = num_messages * MESSAGES_ANSWERED
+        t = random.expovariate(1.0 / random.randint(min(6, u), min(30, u)))
+
     yield env.timeout(t)
     message_tokens = num_messages * MESSAGE_TOKENS
     
     slot = _retrieve_slot_available(endpoint=endpoint)
     if slot == -1:
-        slot = 5
+        slot = NUMBER_OF_SLOTS - 1
     
     _free_tokens(env=env, endpoint=endpoint, slot=slot, tokens=message_tokens)
 
@@ -145,8 +151,8 @@ def message_arrivals(env: Environment, endpoint: Endpoint, interval: int):
         num_messages = random.randint(0, 10)
         env.process(chatbot(env, slot, num_messages, endpoint))
         # Send a new message in a average time of interval
-        t = random.expovariate(1.0 / interval)
-        yield env.timeout(10)
+        # t = random.expovariate(interval)
+        yield env.timeout(interval)
 
 
 # Setup and start the simulation
@@ -155,7 +161,8 @@ random.seed(RANDOM_SEED)
 env = simpy.Environment()
 
 
-slots = [0, 1, 2, 3, 4, 5, -1]
+slots = [i for i in range(0, NUMBER_OF_SLOTS, 1)]
+slots.append(-1)
 endpoint = Endpoint(
     counter=simpy.Resource(env, capacity=1),
     slots=slots,
@@ -183,3 +190,25 @@ for slot in slots:
             f'Available tokens {available_tokens}'
         )
         print(f'  Number of message errors: {num_errors}')
+
+
+# Create a figure and a set of subplots
+fig, ax = plt.subplots()
+
+# Iterate over each slot and plot the times
+for slot, times in endpoint.when_slot_full.items():
+    # Convert slot to integer for plotting
+    # Map slot -1 to 6 for plotting
+    slot = NUMBER_OF_SLOTS if slot == -1 else slot
+    ax.scatter(times, [slot] * len(times), 
+               label=f'Slot {slot if slot != NUMBER_OF_SLOTS else str(NUMBER_OF_SLOTS) + " - Error"}')
+
+# Add labels and title
+ax.set_xlabel('Time (seconds)')
+ax.set_ylabel('Slot')
+ax.set_title('Slot Full Times')
+ax.legend(loc='lower right')
+
+
+# Show plot
+plt.show()
