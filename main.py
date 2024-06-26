@@ -6,7 +6,7 @@ Scenario:
   to the endpoint answer a message is 10 seconds.
   When the endpoint receive more than 240k token in less than 1 minute, the endpoint 
   responds with an error.
-  The birth rate of messages are a random number between 0 to 10. During the simulation
+  The birth rate of messages are a random number between 0 to 20. During the simulation
   we are using the number of tokens in the interval. New slots of message are arriving 
   each 10 seconds.
   The death rate is defined as slots of 40k tokens. To be more specific, we are defining 
@@ -20,6 +20,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import random
 import simpy
+import json
 
 from simpy import Environment
 from typing import Dict, List, NamedTuple, Optional, Tuple
@@ -30,7 +31,7 @@ TPM = 240  # Tokens Per Minute divided by 1000.
 MESSAGE_TOKENS = 7 # Average tokens per message divided by 1000.
 NUMBER_OF_SLOTS = 6 # Number of states to be used in the simulation
 ENDPOINT_SLOT = TPM / NUMBER_OF_SLOTS # Tokens per slot. E.g.: (240 / 6) = 40 tokens.
-SIM_TIME = 60*(60*2)  # Simulate until.
+SIM_TIME = 60*(60*24)  # Simulate until.
 MESSAGES_ANSWERED = 10 # Average message response time.
 
 
@@ -42,6 +43,7 @@ class Endpoint(NamedTuple):
     slot_full: Dict[str, simpy.Event]
     when_slot_full: Dict[str, List[Optional[float]]]
     messages_error: Dict[str, int]
+    slot_counter: Dict[str, int]
 
 
 def _retrieve_slot_available(endpoint: Endpoint) -> int:
@@ -69,24 +71,29 @@ def _slot_operation(env: Environment, endpoint: Endpoint, slot: int, message_tok
         endpoint.slot_full[slot].succeed()
         endpoint.when_slot_full[slot].append(env.now)
         endpoint.tokens_available[slot] = 0
+        endpoint.slot_counter[slot] += 1
         new_slot = _retrieve_slot_available(endpoint=endpoint)
         if new_slot == -1:
             return new_slot, message_tokens
         return _slot_operation(env=env, endpoint=endpoint, slot=new_slot,message_tokens=message_tokens)
 
+    endpoint.slot_counter[slot] += 1
+
     return slot, message_tokens
 
 
-def _error_operation(env: Environment, endpoint: Endpoint, slot: int = -1) -> None:
+def _error_operation(env: Environment, endpoint: Endpoint, slot: int = -1, num_messages: int = 1) -> None:
     """Method to commit the error in the slot."""
     endpoint.when_slot_full[slot].append(env.now)
-    endpoint.messages_error[slot] += 1
+    endpoint.messages_error[slot] += num_messages
+    endpoint.slot_counter[slot] += 1
 
 
 def _free_tokens(env: Environment, endpoint: Endpoint, slot: int, tokens: int) -> bool:
     """Method to free tokens used."""
     endpoint.slot_full[slot] = env.event()
     endpoint.tokens_available[slot] += tokens
+    endpoint.slot_counter[slot] += 1
 
     if endpoint.tokens_available[slot] > ENDPOINT_SLOT:
         new_tokens = endpoint.tokens_available[slot] - ENDPOINT_SLOT
@@ -96,24 +103,20 @@ def _free_tokens(env: Environment, endpoint: Endpoint, slot: int, tokens: int) -
     return True
 
 
-def _answer_messages(env: Environment, endpoint: Endpoint, num_messages: int):
+def _answer_messages(env: Environment, endpoint: Endpoint):
     """This method is to represent the death process and simulate the tokens be answered
        by the endpoint.
        
     """
-    t = 0
-    if num_messages > 0:
-        u = num_messages * MESSAGES_ANSWERED
-        t = random.expovariate(1.0 / random.randint(min(6, u), min(30, u)))
+    t = random.expovariate(1.0 / MESSAGES_ANSWERED)
 
     yield env.timeout(t)
-    message_tokens = num_messages * MESSAGE_TOKENS
     
     slot = _retrieve_slot_available(endpoint=endpoint)
     if slot == -1:
         slot = NUMBER_OF_SLOTS - 1
     
-    _free_tokens(env=env, endpoint=endpoint, slot=slot, tokens=message_tokens)
+    _free_tokens(env=env, endpoint=endpoint, slot=slot, tokens=MESSAGE_TOKENS)
 
 
 def chatbot(env: Environment, slot: int, num_messages: int, endpoint: Endpoint):
@@ -125,19 +128,20 @@ def chatbot(env: Environment, slot: int, num_messages: int, endpoint: Endpoint):
         result = yield message_turn | endpoint.slot_full[slot]
 
         if message_turn not in result:
-            _error_operation(env=env, endpoint=endpoint, slot=slot)
+            _error_operation(env=env, endpoint=endpoint, slot=slot, num_messages=num_messages)
             return
         
         message_tokens = num_messages * MESSAGE_TOKENS
         slot, message_tokens = _slot_operation(env=env, endpoint=endpoint, slot=slot, message_tokens=message_tokens)
 
         if slot == -1:
-            _error_operation(env=env, endpoint=endpoint, slot=slot)
+            _error_operation(env=env, endpoint=endpoint, slot=slot, num_messages=num_messages)
             return
         
         endpoint.tokens_available[slot] -= message_tokens
 
-        env.process(_answer_messages(env, endpoint, num_messages))
+        for _ in range(0, num_messages):
+            env.process(_answer_messages(env, endpoint))
 
 
 def message_arrivals(env: Environment, endpoint: Endpoint, interval: int):
@@ -148,7 +152,7 @@ def message_arrivals(env: Environment, endpoint: Endpoint, interval: int):
     while True:
         slot = _retrieve_slot_available(endpoint)
 
-        num_messages = random.randint(0, 10)
+        num_messages = random.randint(0, 20)
         env.process(chatbot(env, slot, num_messages, endpoint))
         # Send a new message in a average time of interval
         # t = random.expovariate(interval)
@@ -170,12 +174,13 @@ endpoint = Endpoint(
     slot_full={slot: env.event() for slot in slots},
     when_slot_full={slot: [] for slot in slots},
     messages_error={slot: 0 for slot in slots},
+    slot_counter={slot: 0 for slot in slots},
 )
 
 endpoint.tokens_available[-1] = 0
 
 # Start process and run
-env.process(message_arrivals(env, endpoint, MESSAGES_ANSWERED))
+env.process(message_arrivals(env, endpoint, 10))
 env.run(until=SIM_TIME)
 
 # Analysis/results
@@ -184,14 +189,16 @@ for slot in slots:
         full_time = endpoint.when_slot_full[slot]
         num_errors = endpoint.messages_error[slot]
         available_tokens = endpoint.tokens_available[slot]
+        slot_counter = endpoint.slot_counter[slot]
         print(
             f'The slot "{slot}" was full at {full_time} seconds '
             f'after start message arrives. '
             f'Available tokens {available_tokens}'
         )
         print(f'  Number of message errors: {num_errors}')
+        print(f'  Slot counter: {slot_counter}')
 
-
+# Simulation Plot
 # Create a figure and a set of subplots
 fig, ax = plt.subplots()
 
@@ -211,4 +218,23 @@ ax.legend(loc='lower right')
 
 
 # Show plot
+plt.show()
+
+
+# State Plot
+
+# Extract keys and values
+states = list(endpoint.slot_counter.keys())
+times = list(endpoint.slot_counter.values())
+
+# Define a color palette with a specific color for the error state
+colors = ['skyblue', 'lightgreen', 'orange', 'purple', 'pink', 'yellow', 'red']
+state_colors = [colors[i] if state != '-1' else 'red' for i, state in enumerate(states)]
+
+# Plotting
+plt.figure(figsize=(8, 8))
+plt.pie(times, labels=states, colors=state_colors, autopct='%1.1f%%', startangle=140)
+plt.title('Time in Different States')
+
+# Display the plot
 plt.show()
