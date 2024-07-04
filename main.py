@@ -29,7 +29,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 RANDOM_SEED = 2024
 TPM = 240  # Tokens Per Minute divided by 1000.
 MESSAGE_TOKENS = 7 # Average tokens per message divided by 1000.
-NUMBER_OF_SLOTS = 240 # Number of states to be used in the simulation. 
+NUMBER_OF_SLOTS = 6 # Number of states to be used in the simulation. 
 ENDPOINT_SLOT = TPM / NUMBER_OF_SLOTS # Tokens per slot. E.g.: (240 / 6) = 40 tokens.
 SIM_TIME = 60*(60*24)  # Simulate until.
 MESSAGES_ANSWERED = 10 # Average message response time.
@@ -252,17 +252,17 @@ plt.show()
 # State Plot
 
 # Extract keys and values
-# states = list(endpoint.slot_counter.keys())
-# times = list(endpoint.slot_counter.values())
+states = list(endpoint.slot_timer.keys())
+times = list(endpoint.slot_timer.values())
 
 # Define a color palette with a specific color for the error state
-# colors = ['skyblue', 'lightgreen', 'orange', 'purple', 'pink', 'yellow', 'red']
-# state_colors = [colors[i] if state != '-1' else 'red' for i, state in enumerate(states)]
+colors = ['blue', 'orange', 'green', 'red', 'purple', 'brown']
+state_colors = [colors[i] for i, state in enumerate(states)]
 
 # Plotting
-# plt.figure(figsize=(8, 8))
-# plt.pie(times, labels=states, colors=state_colors, autopct='%1.1f%%', startangle=140)
-# plt.title('Time in Different States')
+plt.figure(figsize=(8, 8))
+plt.pie(times, labels=states, colors=state_colors, autopct='%1.1f%%', startangle=140)
+plt.title('Time in Different States')
 
 # Display the plot
-# plt.show()
+plt.show()
