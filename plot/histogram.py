@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.stats import iqr
 
 
 # Create a list of times and slots for heatmap
@@ -17,9 +19,27 @@ all_times = []
 for times in data.values():
     all_times.extend(times)
 
+
+# Number of data points
+n = len(all_times)
+
+# Square Root Choice
+sqrt_bins = int(np.sqrt(n))
+
+# Sturges' Formula
+sturges_bins = int(np.log2(n) + 1)
+
+# Rice Rule
+rice_bins = int(2 * (n**(1/3)))
+
+# Freedman-Diaconis Rule
+fd_bins = int((2 * iqr(all_times)) / (n**(1/3)))
+
+
+
 # Plot histogram
 plt.figure(figsize=(12, 6))
-plt.hist(all_times, bins=100)
+plt.hist(all_times, bins=sqrt_bins)
 plt.xlabel('Time (seconds)')
 plt.ylabel('Frequency')
 plt.title('Distribution of Fullness Events Over Time')

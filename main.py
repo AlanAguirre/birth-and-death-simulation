@@ -20,13 +20,12 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import random
 import simpy
-import json
 
 from simpy import Environment
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 
-RANDOM_SEED = 2024
+RANDOM_SEED = 2024 # 2024, 2000, 2010, 2015, 2020
 TPM = 240  # Tokens Per Minute divided by 1000.
 MESSAGE_TOKENS = 7 # Average tokens per message divided by 1000.
 NUMBER_OF_SLOTS = 6 # Number of states to be used in the simulation. 
@@ -80,6 +79,8 @@ def _slot_operation(env: Environment, endpoint: Endpoint, slot: int, message_tok
         _set_slot_timer(env, endpoint, slot)
 
         if slot == endpoint.slots[-1]:
+            if endpoint.when_slot_full[slot][-1] != env.now:
+                endpoint.when_slot_full[slot].append(env.now)
             return slot, message_tokens
         
         new_slot = _retrieve_slot_available(endpoint=endpoint)
@@ -109,7 +110,8 @@ def _free_tokens(env: Environment, endpoint: Endpoint, slot: int, tokens: int) -
     if endpoint.tokens_available[slot] > ENDPOINT_SLOT:
         new_tokens = endpoint.tokens_available[slot] - ENDPOINT_SLOT
         endpoint.tokens_available[slot] = ENDPOINT_SLOT
-        return _free_tokens(env=env, endpoint=endpoint, slot=(slot - 1), tokens=new_tokens)
+        new_slot = max(0, slot - 1)
+        return _free_tokens(env=env, endpoint=endpoint, slot=new_slot, tokens=new_tokens)
     return True
 
 
@@ -227,41 +229,48 @@ print('Total time: ', count_time)
 print('Total tokens: ', count_tokens)
 print('Total global messages: ', endpoint.global_message_counter[0])
 print('Total global tokens: ', endpoint.global_token_counter[0])
-# Simulation Plot
-# Create a figure and a set of subplots
-fig, ax = plt.subplots()
+
 
 # Iterate over each slot and plot the times
+min_seconds = 0
+max_seconds = 86400
+all_times = []
 for slot, times in endpoint.when_slot_full.items():
-    # Convert slot to integer for plotting
+    all_times.extend(times)
 
-    ax.scatter(times, [slot] * len(times), 
-               label=f'Slot {slot}')
-
-# Add labels and title
-ax.set_xlabel('Time (seconds)')
-ax.set_ylabel('Slot')
-ax.set_title('Slot Full Times')
-ax.legend(loc='lower right')
-
-
-# Show plot
+# Plot histogram
+plt.figure(figsize=(12, 6))
+plt.hist(all_times, bins=range(min_seconds, max_seconds, 60))
+plt.xlabel('Time (seconds)')
+plt.ylabel('Frequency')
+plt.title(f'Distribution of Fullness Events Over Time for all the slots')
 plt.show()
 
 
-# State Plot
+for slot, times in endpoint.when_slot_full.items():
+    # Plot histogram
+    plt.figure(figsize=(12, 6))
+    plt.hist(times, bins=range(min_seconds, max_seconds, 60))
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Frequency')
+    plt.title(f'Distribution of Fullness Events Over Time for the slot {slot}')
+    plt.show()
 
+
+# State Plot
 # Extract keys and values
 states = list(endpoint.slot_timer.keys())
 times = list(endpoint.slot_timer.values())
 
 # Define a color palette with a specific color for the error state
 colors = ['blue', 'orange', 'green', 'red', 'purple', 'brown']
-state_colors = [colors[i] for i, state in enumerate(states)]
-
 # Plotting
-plt.figure(figsize=(8, 8))
-plt.pie(times, labels=states, colors=state_colors, autopct='%1.1f%%', startangle=140)
+plt.figure(figsize=(10, 6))
+plt.bar(states, times, color=[colors[state] for state in states])
+
+# Adding labels and title
+plt.xlabel('States')
+plt.ylabel('Time in Seconds')
 plt.title('Time in Different States')
 
 # Display the plot
